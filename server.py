@@ -78,7 +78,8 @@ def fazTudo(fd):
         buffer = fd.recv(1024).decode("utf-8")
         if not buffer:
             break
-        print('==>', buffer)
+#        print('==>', buffer)
+        print(buffer)
         #fd.send(bytearray(buffer, 'utf-8'))
     print("Conexão terminada com", fd)
     fd.close()
