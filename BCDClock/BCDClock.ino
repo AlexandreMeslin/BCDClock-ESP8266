@@ -1,12 +1,11 @@
-//#define DEBUG
-//#define DEBUG_2
+#define DEBUG
 //#define NCE
 
+#include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
-#include <credentials.h>
 #include <NTPClient.h>
 
 /*
@@ -21,6 +20,8 @@
 #define println(x)  {client.println(x);}
 #endif
 
+#define HOST_NAME "BCDCLOCK"
+
 /*
  * New types
  */
@@ -31,13 +32,12 @@ typedef unsigned long MY_TIME_T;
  */
 void myDelay(MY_TIME_T waitTime);
 void draw(int col, int value);
-void clearScreen();
 
 /*
  * Constants & variables
  */
-//#define DOWN_UP (0)
-//#define UP_DOWN (1)
+#define DOWN_UP (0)
+#define UP_DOWN (1)
 #define SCAN_INTERVAL ((MY_TIME_T)1L)
 
 #ifdef NCE
@@ -48,13 +48,16 @@ void clearScreen();
 #define PORT (8752)
 #endif
 
+/*
 // WiFi 
 #ifdef NCE
 const char* ssid = "hsNCE";
+const char* password = "";
 #else
 const char* ssid = MY_SSID;
 const char* password = MY_PASSWORD;
 #endif
+*/
 
 // WiFi console
 WiFiClient client;
@@ -68,8 +71,6 @@ int ledState = LOW;             // ledState used to set the LED
 // Timestamp
 const int timezone = -3;
 const int dst = 0;
-time_t now;
-struct tm *timeinfo;
 
 // Display
 //(0,0) is at top-right position of display
@@ -81,53 +82,10 @@ const int cols[7] = {16, 14, 12,  0, 13,  4,  5};
 void setup() {
   Serial.begin(115200);
   println("Booting");
-  WiFi.mode(WIFI_STA);
-#ifdef NCE
-  WiFi.begin(ssid);
-#else
-  WiFi.begin(ssid, password);
-#endif
-  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
-    println("Connection Failed! Rebooting...");
-    delay(10000);
-    ESP.restart();
-  }
-  println("Connected to WiFi");
 
-  // Hostname defaults to esp8266-[ChipID]
-  ArduinoOTA.setHostname("BCDClock");
-  ArduinoOTA.onStart([]() {
-    String type;
-    if (ArduinoOTA.getCommand() == U_FLASH) {
-      type = "sketch";
-    } else { // U_FS
-      type = "filesystem";
-    }
+  setupWiFiManager();
+  setupArduinoOTA();
 
-    // NOTE: if updating FS this would be the place to unmount FS using FS.end()
-    println("Start updating " + type);
-  });
-  ArduinoOTA.onEnd([]() {
-    println("\nEnd");
-  });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    printf("Progress: %u%%\r", (progress / (total / 100)));
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
-    printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) {
-      println("Auth Failed");
-    } else if (error == OTA_BEGIN_ERROR) {
-      println("Begin Failed");
-    } else if (error == OTA_CONNECT_ERROR) {
-      println("Connect Failed");
-    } else if (error == OTA_RECEIVE_ERROR) {
-      println("Receive Failed");
-    } else if (error == OTA_END_ERROR) {
-      println("End Failed");
-    }
-  });
-  ArduinoOTA.begin();
   println("Ready!");
   print("IP address: ");
   println(WiFi.localIP().toString());
@@ -143,7 +101,7 @@ void setup() {
   println(PORT);
   delay(1000);
 
-  // blink while await program upload command
+  // blink
   println("Waiting for program upload command.");
   pinMode(ledPin, OUTPUT);
   for(int i=0; i<10; i++) {
@@ -166,7 +124,6 @@ void setup() {
   for(int i=0; i< 7; i++) {
     pinMode(cols[i], OUTPUT);
   }
-  clearScreen();
 
   // internal time
   configTime(timezone * 3600, dst * 0, "pool.ntp.org", "time.nist.gov");
@@ -181,6 +138,8 @@ void setup() {
 void loop() {
   ArduinoOTA.handle();
   
+  time_t now;
+  struct tm *timeinfo;
   time(&now);
   timeinfo = localtime(&now);
 
@@ -196,6 +155,16 @@ void loop() {
   currentDate += " ";   
   print(currentDate);
 #endif
+/*
+  for(int col=0; col<7; col++) {
+    for(int valor=1; valor<10; valor<<=1) {
+      draw(col, valor);
+    }
+  }
+
+  // seconds - cols 0 1
+  draw(0,5);
+*/
 
   draw(0, timeinfo->tm_sec % 10);
   draw(1, (timeinfo->tm_sec / 10) % 10);
@@ -205,9 +174,24 @@ void loop() {
   // hours - cols 4 5
   draw(4, timeinfo->tm_hour % 10);
   draw(5, (timeinfo->tm_hour / 10) % 10);
-  // day of week col 6
+  // col 6 not used (yet!)
+
+  // day of week col 7
   draw(6, (timeinfo->tm_wday % 10)+1);
-  // col 7 not used (yet!)
+
+/*
+    // year - cols 0 1 2 3
+    draw(0, UP_DOWN, (timeinfo->tm_year + 1900) % 10);
+    draw(1, UP_DOWN, ((timeinfo->tm_year + 1900) / 10) % 10);
+    draw(2, UP_DOWN, ((timeinfo->tm_year + 1900) / 100) % 10);
+    draw(3, UP_DOWN, (timeinfo->tm_year + 1900) / 1000);
+    // month - cols 4 5
+    draw(4, DOWN_UP, timeinfo->tm_mon % 10);
+    draw(5, DOWN_UP, timeinfo->tm_mon / 10);
+    // month - cols 4 5
+    draw(6, DOWN_UP, timeinfo->tm_mday % 10);
+    draw(7, DOWN_UP, timeinfo->tm_mday / 10);
+*/    
 }
 
 /**
@@ -225,44 +209,23 @@ void loop() {
   const int cols[8] = {14, 13,  2,  5,  3,  1,  4};
  */
 void draw(int col, int value) {
-#ifdef DEBUG_2
-  print("Entrando draw para escrever ");
-  print(value);
-  print(" na coluna ");
-  println(col);
+#ifdef DEBUG  
   int aux = value;
 #endif
 
-  // clear screen
-  clearScreen();
-
-  // draw a number
-  digitalWrite(cols[col], LOW);
   for(int row=0; value; row++, value >>= 1) {
     if(value & 1) {
-#ifdef DEBUG_2
+#ifdef DEBUG        
       char s[100];
       sprintf(s, "Value = %d (%d), linha %d, coluna %d", aux, value, 3-row, col);
       println(s);
 #endif        
       digitalWrite(rows[3-row], HIGH);
+      digitalWrite(cols[col], LOW);
+      myDelay(SCAN_INTERVAL);
+      digitalWrite(rows[3-row], LOW);
+      digitalWrite(cols[col], HIGH);
     }
-  }
-  //myDelay(SCAN_INTERVAL);
-  
-#ifdef DEBUG_2
-  println("Saindo draw");
-#endif
-}
-
-/**
- * clearScreen: clear the screen
- */
-void clearScreen() {
-  for(int col=0; col<7; col++)
-    digitalWrite(cols[col], HIGH);
-  for(int row=0; row<4; row++) {
-    digitalWrite(rows[row], LOW);
   }
 }
 
@@ -280,4 +243,111 @@ void myDelay(MY_TIME_T waitTime) {
     ArduinoOTA.handle();
     delay(1);
   }
+}
+
+
+
+
+
+
+/**
+ * setupWiFiManager
+ * Configura o WiFi Manager
+ * Utiliza o endereço IP 192.168.0.1
+ * SSID OTA-Template
+ * Não tem senha 
+ */
+void setupWiFiManager(void) {
+  // WiFiManager, Local initialization. Once its business is done, there is no need to keep it around
+  WiFiManager wm;
+
+  // reset settings - wipe stored credentials for testing
+  // these are stored by the esp library
+  // wm.resetSettings();
+
+  // Automatically connect using saved credentials,
+  // if connection fails, it starts an access point with the specified name ( "AutoConnectAP"),
+  // if empty will auto generate SSID, if password is blank it will be anonymous AP (wm.autoConnect())
+  // then goes into a blocking loop awaiting configuration and will return success result
+
+  bool res;
+  // Apagar as credenciais Wi-Fi armazenadas (descomente a linha abaixo para limpar)
+  // wm.resetSettings();
+  //set custom ip for portal
+  wm.setAPStaticIPConfig(IPAddress(192,168,0,1), IPAddress(192,168,0,1), IPAddress(255,255,255,0));
+  // res = wm.autoConnect(); // auto generated AP name from chipid
+  // res = wm.autoConnect("AutoConnectAP"); // anonymous ap
+  // res = wm.autoConnect("OTA-Template", "password"); // password protected ap
+  res = wm.autoConnect(HOST_NAME); // no password protected
+
+  if (!res) {
+    println("Failed to connect");
+    // ESP.restart();
+  }
+  else {
+    // if you get here you have connected to the WiFi
+    println("connected...yeey :)");
+  }
+}
+
+
+
+/**
+ * setupArduinoOTA
+ * Configura o Arduino OTA para upload de código via Wi-Fi
+ * Porta 8266 (default)
+ * Host OTA-Template
+ * Sem senha
+ */
+void setupArduinoOTA(void) {
+  // Port defaults to 8266
+  // ArduinoOTA.setPort(8266);
+
+  // Hostname defaults to esp8266-[ChipID]
+  ArduinoOTA.setHostname((HOST_NAME + WiFi.localIP().toString()).c_str());
+
+  // No authentication by default
+  // ArduinoOTA.setPassword("admin");
+
+  // Password can be set with it's md5 value as well
+  // MD5(admin) = 21232f297a57a5a743894a0e4a801fc3
+  // ArduinoOTA.setPasswordHash("21232f297a57a5a743894a0e4a801fc3");
+
+  ArduinoOTA.onStart([]() {
+    String type;
+    if (ArduinoOTA.getCommand() == U_FLASH) {
+      type = "sketch";
+    } else {  // U_FS
+      type = "filesystem";
+    }
+
+    // NOTE: if updating FS this would be the place to unmount FS using FS.end()
+    println("Start updating " + type); 
+  });
+
+  ArduinoOTA.onEnd([]() { println("\nEnd"); });
+
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) { 
+    printf("Progress: %u%%\r", (progress / (total / 100))); 
+  });
+
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) {
+      println("Auth Failed");
+    } else if (error == OTA_BEGIN_ERROR) {
+      println("Begin Failed");
+    } else if (error == OTA_CONNECT_ERROR) {
+      println("Connect Failed");
+    } else if (error == OTA_RECEIVE_ERROR) {
+      println("Receive Failed");
+    } else if (error == OTA_END_ERROR) {
+      println("End Failed");
+    } 
+  });
+
+  ArduinoOTA.begin();
+  println("Ready");
+  print("IP address: ");
+  println(WiFi.localIP());
 }
